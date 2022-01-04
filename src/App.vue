@@ -9,6 +9,7 @@
           <div class="mt-1 relative rounded-md shadow-md">
             <input
               v-model="tickerInput"
+              @input="updateAutocomplete"
               @keydown.enter="addTicker"
               type="text"
               name="wallet"
@@ -18,30 +19,21 @@
             />
           </div>
           <div
-            class="flex bg-white shadow-md p-1 rounded-md shadow-md flex-wrap"
+            v-if="autocompleteSuggestions.length"
+            class="flex bg-white shadow-md p-1 rounded-md flex-wrap"
           >
             <span
+              v-for="suggestion in autocompleteSuggestions"
+              :key="suggestion.symbol"
+              @click="addSuggestedTicker(suggestion.symbol)"
               class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
             >
-              BTC
-            </span>
-            <span
-              class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-            >
-              DOGE
-            </span>
-            <span
-              class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-            >
-              BCH
-            </span>
-            <span
-              class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
-            >
-              CHD
+              {{ suggestion.symbol }}
             </span>
           </div>
-          <div class="text-sm text-red-600">Такой тикер уже добавлен</div>
+          <div v-if="invalidInput" class="text-sm text-red-600">
+            Такой тикер уже добавлен
+          </div>
         </div>
       </div>
       <button
@@ -164,21 +156,58 @@ export default {
       tickerInput: "",
       tickers: [],
       selectedTicker: null,
+      invalidInput: false,
+      coinList: [],
+      autocompleteSuggestions: [],
       API: "631710474c42d3740b4ddcbdd31ad1227e802a440eca0ff242de182eb9d89c52",
     };
   },
   mounted() {
     setInterval(this.fetchTickerPrices, 12000);
+    this.fetchCoinList();
   },
   methods: {
+    getTickerNames() {
+      return this.tickers.map((t) => t.name);
+    },
+    updateAutocomplete() {
+      this.invalidInput = false;
+
+      const tickerName = this.tickerInput.toUpperCase();
+
+      if (!tickerName) {
+        this.autocompleteSuggestions = [];
+        return;
+      }
+
+      const suggestions = this.coinList.filter((t) =>
+        t.fullName.includes(tickerName)
+      );
+
+      this.autocompleteSuggestions = suggestions.slice(0, 4);
+    },
     addTicker() {
+      const tickerName = this.tickerInput.toUpperCase();
+
+      if (this.getTickerNames().includes(tickerName)) {
+        this.invalidInput = true;
+        return;
+      }
+
       this.tickers.push({
-        name: this.tickerInput.toUpperCase(),
+        name: tickerName,
         price: "-",
         priceHistory: [],
       });
 
       this.tickerInput = "";
+
+      this.updateAutocomplete();
+    },
+    addSuggestedTicker(tickerName) {
+      this.tickerInput = tickerName;
+
+      this.addTicker();
     },
     deleteTicker(tickerName) {
       this.tickers = this.tickers.filter((t) => t.name !== tickerName);
@@ -187,8 +216,25 @@ export default {
         this.selectedTicker = null;
       }
     },
+    async fetchCoinList() {
+      const f = await fetch(
+        "https://min-api.cryptocompare.com/data/all/coinlist?summary=true"
+      );
+
+      const response = await f.json();
+      const data = response.Data;
+
+      for (const coin in data) {
+        const coinProperties = data[coin];
+
+        this.coinList.push({
+          fullName: coinProperties.FullName.toUpperCase(),
+          symbol: coinProperties.Symbol,
+        });
+      }
+    },
     async fetchTickerPrices() {
-      const tickerNames = this.tickers.map((t) => t.name);
+      const tickerNames = this.getTickerNames();
 
       if (!tickerNames.length) {
         return;
@@ -204,10 +250,16 @@ export default {
       const data = response.RAW;
 
       this.tickers.map((t) => {
-        const tickerPrice = data[t.name].USD.PRICE;
-        t.price =
-          tickerPrice > 1 ? tickerPrice.toFixed(2) : tickerPrice.toPrecision(2);
-        t.priceHistory.push(tickerPrice);
+        try {
+          const tickerPrice = data[t.name].USD.PRICE;
+          t.price =
+            tickerPrice > 1
+              ? tickerPrice.toFixed(2)
+              : tickerPrice.toPrecision(2);
+          t.priceHistory.push(tickerPrice);
+        } catch (error) {
+          t.price = "ERROR";
+        }
       });
     },
     normalizePriceHistory(priceHistory) {
@@ -217,7 +269,6 @@ export default {
 
       const maxPrice = Math.max(...priceHistory);
       const minPrice = Math.min(...priceHistory);
-      console.log(maxPrice, minPrice, ...priceHistory);
 
       return priceHistory.map(
         (price) =>

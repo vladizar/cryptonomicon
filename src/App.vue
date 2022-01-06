@@ -60,9 +60,35 @@
 
     <template v-if="tickers.length">
       <hr class="w-full border-t border-gray-600 my-4" />
+      <div>
+        <button
+          v-if="page > 1"
+          @click="page = Math.max(1, page - 1)"
+          class="my-4 mx-2 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+        >
+          Назад
+        </button>
+        <button
+          v-if="page < Math.ceil(getFilteredTickers().length / 6)"
+          @click="
+            page = Math.min(
+              Math.ceil(getFilteredTickers().length / 6),
+              page + 1
+            )
+          "
+          class="my-4 mx-2 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+        >
+          Вперед
+        </button>
+        <div>
+          Фильтр:
+          <input v-model="filterInput" />
+        </div>
+      </div>
+      <hr class="w-full border-t border-gray-600 my-4" />
       <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div
-          v-for="ticker in tickers"
+          v-for="ticker in getCurrentPageTickers(getFilteredTickers())"
           :key="ticker.name"
           :class="{
             'border-4': ticker.name === selectedTicker?.name,
@@ -159,16 +185,75 @@ export default {
       invalidInput: false,
       coinList: [],
       autocompleteSuggestions: [],
+      page: 1,
+      filterInput: "",
       API: "631710474c42d3740b4ddcbdd31ad1227e802a440eca0ff242de182eb9d89c52",
     };
+  },
+  watch: {
+    tickers: {
+      deep: true,
+      handler() {
+        this.updateLocalStorage();
+      },
+    },
+    filterInput() {
+      this.selectedTicker = null;
+      this.page = 1;
+
+      this.updateURL();
+    },
+    page() {
+      this.updateURL();
+    },
   },
   mounted() {
     setInterval(this.fetchTickerPrices, 12000);
     this.fetchCoinList();
+
+    const tickersData = localStorage.getItem("cryptonomicon-tickers");
+
+    if (!tickersData) {
+      return;
+    }
+
+    JSON.parse(tickersData).map((tickerName) => {
+      this.tickers.push(this.getNewTicker(tickerName));
+    });
+
+    const windowData = Object.fromEntries(
+      new URL(window.location).searchParams.entries()
+    );
+
+    if (windowData.filter) {
+      this.filterInput = windowData.filter;
+    }
+
+    if (windowData.page) {
+      this.page = windowData.page;
+    }
   },
   methods: {
+    updateURL() {
+      window.history.pushState(
+        null,
+        document.title,
+        `${window.location.pathname}?filter=${this.filterInput}&page=${this.page}`
+      );
+    },
     getTickerNames() {
       return this.tickers.map((t) => t.name);
+    },
+    getFilteredTickers() {
+      return this.tickers.filter((t) =>
+        t.name.includes(this.filterInput.toUpperCase())
+      );
+    },
+    getCurrentPageTickers(tickersList) {
+      const firstIndex = (this.page - 1) * 6;
+      const lastIndex = this.page * 6;
+
+      return tickersList.slice(firstIndex, lastIndex);
     },
     updateAutocomplete() {
       this.invalidInput = false;
@@ -186,6 +271,19 @@ export default {
 
       this.autocompleteSuggestions = suggestions.slice(0, 4);
     },
+    updateLocalStorage() {
+      localStorage.setItem(
+        "cryptonomicon-tickers",
+        JSON.stringify(this.getTickerNames())
+      );
+    },
+    getNewTicker(tickerName) {
+      return {
+        name: tickerName,
+        price: "-",
+        priceHistory: [],
+      };
+    },
     addTicker() {
       const tickerName = this.tickerInput.toUpperCase();
 
@@ -194,13 +292,10 @@ export default {
         return;
       }
 
-      this.tickers.push({
-        name: tickerName,
-        price: "-",
-        priceHistory: [],
-      });
+      this.tickers.push(this.getNewTicker(tickerName));
 
       this.tickerInput = "";
+      this.filterInput = "";
 
       this.updateAutocomplete();
     },
@@ -215,6 +310,11 @@ export default {
       if (tickerName === this.selectedTicker?.name) {
         this.selectedTicker = null;
       }
+
+      this.page = Math.max(
+        1,
+        Math.min(Math.ceil(this.getFilteredTickers().length / 6), this.page)
+      );
     },
     async fetchCoinList() {
       const f = await fetch(
@@ -272,7 +372,7 @@ export default {
 
       return priceHistory.map(
         (price) =>
-          ((price - minPrice) * 90) / (maxPrice - minPrice + 0.0001) + 10
+          ((price - minPrice) * 90) / (maxPrice - minPrice + 0.000000001) + 10
       );
     },
   },
